@@ -26,6 +26,7 @@ int main()
     struct structA structa;
     structa.a = 123;
     structa.b.b = 999;
+    structa.b.c = 123;
     print_structA(&structa);
     printf("321");
     // print_structA()

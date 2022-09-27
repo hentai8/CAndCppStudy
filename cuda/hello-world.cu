@@ -1,46 +1,58 @@
 #include <stdio.h>
+#include <iostream>
 
-__global__
-void saxpy(int n, float a, float *x, float *y)
+// 两个向量加法kernel，grid和block均为一维
+__global__ void add(float* x, float * y, float* z, int n)
 {
-    int i = blockIdx.x*blockDim.x + threadIdx.x;
-    if (i < n) y[i] = a*x[i] + y[i];
+    // 获取全局索引
+    int index = threadIdx.x + blockIdx.x * blockDim.x;
+    // 步长
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n; i += stride)
+    {
+        z[i] = x[i] + y[i];
+    }
 }
 
-int main(void)
+int main()
 {
-//    右移20格，即2^20
-    int N = 1<<20;
-    float *x, *y, *d_x, *d_y;
-//    分配内存，声明为一个长度为n的float数组
-    x = (float*)malloc(N*sizeof(float));
-    y = (float*)malloc(N*sizeof(float));
+    int N = 1 << 20;
+    int nBytes = N * sizeof(float);
 
-//    分配显卡中的内存，声明为一个长度为n的float数组
-    cudaMalloc(&d_x, N*sizeof(float));
-    cudaMalloc(&d_y, N*sizeof(float));
+    // 申请托管内存
+    float *x, *y, *z;
+    cudaMallocManaged((void**)&x, nBytes);
+    cudaMallocManaged((void**)&y, nBytes);
+    cudaMallocManaged((void**)&z, nBytes);
 
-    for (int i = 0; i < N; i++) {
-        x[i] = 1.0f;
-        y[i] = 2.0f;
+    // 初始化数据
+    for (int i = 0; i < N; ++i)
+    {
+        x[i] = 10.0;
+        y[i] = 20.0;
     }
 
-    cudaMemcpy(d_x, x, N*sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y, y, N*sizeof(float), cudaMemcpyHostToDevice);
+    // 定义kernel的执行配置
+    dim3 blockSize(256);
+    dim3 gridSize((N + blockSize.x - 1) / blockSize.x);
+    // 执行kernel
+    add << < gridSize, blockSize >> >(x, y, z, N);
 
-    // Perform SAXPY on 1M elements
-    saxpy<<<(N+255)/256, 256>>>(N, 2.0f, d_x, d_y);
-
-    cudaMemcpy(y, d_y, N*sizeof(float), cudaMemcpyDeviceToHost);
-
-    float maxError = 0.0f;
+    // 同步device 保证结果能正确访问
+    cudaDeviceSynchronize();
+    // 检查执行结果
+    float maxError = 0.0;
     for (int i = 0; i < N; i++)
-        maxError = max(maxError, abs(y[i]-4.0f));
-    printf("Max error: %f", maxError);
+        maxError = fmax(maxError, fabs(z[i] - 30.0));
+    std::cout << "最大误差: " << maxError << std::endl;
+    std::cout << "x: " << x[1] << std::endl;
+    std::cout << "y: " << y[1] << std::endl;
+    std::cout << "z: " << z[1] << std::endl;
 
-//    回收内存
-    cudaFree(d_x);
-    cudaFree(d_y);
-    free(x);
-    free(y);
+    // 释放内存
+    cudaFree(x);
+    cudaFree(y);
+    cudaFree(z);
+
+    return 0;
 }

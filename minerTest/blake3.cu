@@ -4,6 +4,8 @@
 #include "cuda_profiler_api.h"
 #include <stdio.h>
 
+#define mining_steps 10
+
 __constant__ uint8_t c_PaddedMessage[256];
 
 __global__ void gpu_hello_world() {
@@ -123,37 +125,48 @@ __device__ void load(uint32_t d[], const unsigned char s[]) {
 
 
 __global__ void blake3_gpu_hash() {
+	uint32_t hash_count = 0;
 	uint32_t iv[] = {
 		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
 		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 	};
 	int i;
-	
+
+    int stride = blockDim.x * gridDim.x;
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    uint32_t *nonce = &iv[8];
+    *nonce = (*nonce) / stride * stride + tid;
+
 	uint32_t m[16];
 
 	load(m, c_PaddedMessage);
-	blake3_compress(iv, m, iv, 0, 64, 1);
-	
-	printf("ROUND1:\n");
-	for(i = 0; i < 8; i++)
-		printf("%08x ", iv[i]);
-	printf("\n");
 
-	load(m, c_PaddedMessage+64);
-	blake3_compress(iv, m, iv, 0, 64, 0);
+	while (hash_count < mining_steps)
+    {
+		printf("nonce: %d", *nonce);
+        hash_count += 1;
+		*nonce += stride;
+		blake3_compress(iv, m, iv, 0, 64, 1);
 
-	load(m, c_PaddedMessage+128);
-	blake3_compress(iv, m, iv, 0, 64, 0);
+		printf("ROUND1:\n");
+		for(i = 0; i < 8; i++)
+			printf("%08x ", iv[i]);
+		printf("\n");
 
-	load(m, c_PaddedMessage+192);
-	blake3_compress(iv, m, iv, 0, 16, 10);
+		load(m, c_PaddedMessage+64);
+		blake3_compress(iv, m, iv, 0, 64, 0);
 
-	printf("ROUND4:\n");
-	for(i = 0; i < 8; i++)
-		printf("%08x ", iv[i]);
-	printf("\n");
+		load(m, c_PaddedMessage+128);
+		blake3_compress(iv, m, iv, 0, 64, 0);
 
+		load(m, c_PaddedMessage+192);
+		blake3_compress(iv, m, iv, 0, 16, 10);
 
+		printf("ROUND4:\n");
+		for(i = 0; i < 8; i++)
+			printf("%08x ", iv[i]);
+		printf("\n");
+	}
 }
 
 
@@ -182,7 +195,7 @@ int main(int argc, char * argv[]) {
 
     blake3_cpu_init();
     blake3_host_setBlock(pdata, 256);
-    blake3_gpu_hash<<<2,16>>>();
+    blake3_gpu_hash<<<2,2>>>();
 
     gpu_hello_world<<<1,1>>>();
     cudaDeviceReset();
